@@ -1,0 +1,176 @@
+// Computer Laptop Fix - Database Schema
+// Created by HielOS
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:../data/taller.db"
+}
+
+model Order {
+  id                String   @id @default(uuid())
+  orderNumber       String
+  customerName      String
+  customerPhone     String
+  customerEmail     String?
+  deviceType        String
+  deviceBrand       String
+  deviceModel       String
+  serialNumber      String?
+  accessories       String?
+  problemDescription String
+  diagnosis         String?
+  detailedDiagnosis String?
+  estimatedCost     Float    @default(0)
+  partsCost         Float    @default(0)
+  estimatedDelivery String?
+  signature         String?  // base64 image
+  status            String   @default("recibido")
+  budgetStatus      String   @default("none") // none, pending, approved, rejected
+  budgetSentAt      DateTime?
+  budgetRespondedAt DateTime?
+  budgetNote        String?
+  clientNote        String?
+  approvalSignature String?  // base64 image
+  
+  statusHistory     StatusHistory[]
+  notes             Note[]
+  photos            DevicePhoto[]
+  usedParts         OrderPart[]
+  selectedServices  OrderService[]
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  payments          Payment[]
+  paymentStatus     String   @default("PENDIENTE") // PENDIENTE, ANTICIPO, PAGADO, CANCELADO
+}
+
+model Payment {
+  id        String   @id @default(uuid())
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId   String
+  amount    Float
+  method    String   // EFECTIVO, TRANSFERENCIA, TARJETA, OTRO
+  date      DateTime @default(now())
+  note      String?
+}
+
+model StatusHistory {
+  id        String   @id @default(uuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  from      String
+  to        String
+  date      DateTime @default(now())
+  note      String?
+}
+
+model Note {
+  id        String   @id @default(uuid())
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId   String
+  text      String
+  date      DateTime @default(now())
+}
+
+model DevicePhoto {
+  id        String   @id @default(uuid())
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId   String
+  url       String
+}
+
+model OrderPart {
+  id        String   @id @default(uuid())
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId   String
+  partName  String
+  quantity  Int
+  unitCost  Float
+  
+  part      Part?    @relation(fields: [partId], references: [id])
+  partId    String?
+}
+
+model OrderService {
+  id             String   @id @default(uuid())
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId        String
+  serviceName    String
+  basePrice      Float
+  
+  linkedPartId    String?
+  linkedPartName  String?
+  linkedPartCost  Float?
+  
+  service        Service? @relation(fields: [serviceId], references: [id])
+  serviceId      String?
+}
+
+model Part {
+  id          String   @id @default(uuid())
+  name        String
+  cost        Float
+  stock       Int      @default(0)
+  timesUsed   Int      @default(0)
+  
+  orderParts  OrderPart[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Service {
+  id             String   @id @default(uuid())
+  name           String
+  description    String?
+  category       String?
+  basePrice      Float
+  
+  linkedPartId    String?
+  linkedPartName  String?
+  linkedPartCost  Float?
+
+  orderServices  OrderService[]
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Category {
+  id   String @id @default(uuid())
+  name String
+}
+
+model Settings {
+  id                       Int    @id @default(1)
+  businessName             String @default("Computer Laptop Fix")
+  phone                    String @default("")
+  email                    String @default("")
+  address                  String @default("")
+  city                     String @default("")
+  state                    String @default("")
+  zipCode                  String @default("")
+  country                  String @default("")
+  whatsapp                 String @default("")
+  logoUrl                  String @default("")
+  brandColor               String @default("#2563eb")
+  lowStockThreshold        Int    @default(3)
+  currency                 String @default("MXN")
+  schedule                 String @default("")
+  whatsappTemplateCreated  String @default("")
+  whatsappTemplateReady    String @default("")
+  whatsappTemplateBudget   String @default("")
+  countryCode              String @default("52")
+  adminPassword            String?
+  passwordUpdatedAt        DateTime?
+  taxId                    String @default("")
+  website                  String @default("")
+  termsAndConditions       String @default("No nos hacemos responsables por pérdida de datos. Equipos no reclamados en 30 días pasarán a disposición del taller.")
+  cancellationFee          Float  @default(0)
+}
