@@ -7,4 +7,5 @@ npx prisma db push --schema=./prisma/schema.prisma --skip-generate 2>/dev/null |
 
 echo "Starting application on port ${PORT:-3000}..."
 export PORT=${PORT:-3000}
+export HOSTNAME="0.0.0.0"
 exec node server.js
