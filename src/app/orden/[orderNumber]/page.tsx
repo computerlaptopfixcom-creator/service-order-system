@@ -77,8 +77,14 @@ export default function ClientPortalPage() {
   const [cancellationFee, setCancellationFee] = useState(0);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [settings, setSettings] = useState<any>(null);
+  
+  // Login states for QR Code direct scan without session
+  const [verifyPhone, setVerifyPhone] = useState("");
+  const [verifyError, setVerifyError] = useState("");
+  const [verifying, setVerifying] = useState(false);
 
-  useEffect(() => {
+  const fetchOrderData = () => {
+    setLoading(true);
     Promise.all([
       fetch(`/api/orders/portal/${orderNumber}`).then((r) => {
         if (!r.ok) throw new Error("unauthorized");
@@ -92,13 +98,44 @@ export default function ClientPortalPage() {
         if (settings?.logoUrl) setLogoUrl(settings.logoUrl);
         if (settings?.cancellationFee) setCancellationFee(settings.cancellationFee);
         setSettings(settings);
+        setError("");
         setLoading(false);
       })
       .catch(() => {
         setError("unauthorized");
         setLoading(false);
       });
+  };
+
+  useEffect(() => {
+    fetchOrderData();
   }, [orderNumber]);
+
+  const handleVerifyPortal = async () => {
+    if (!verifyPhone.trim()) { setVerifyError("Ingresa tu teléfono"); return; }
+    setVerifying(true);
+    setVerifyError("");
+    try {
+      const res = await fetch("/api/orders/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderNumber, phone: verifyPhone.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setVerifyError(data.error || "Datos incorrectos, verifica tu teléfono.");
+        return;
+      }
+      
+      // Verification successful, token is set. Refetch data.
+      fetchOrderData();
+
+    } catch {
+      setVerifyError("Error de conexión");
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const handleBudgetAction = async (action: "approve" | "reject") => {
     if (!order) return;
@@ -160,19 +197,48 @@ export default function ClientPortalPage() {
   if (error === "unauthorized" || !order) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-        <div className="text-center max-w-sm">
-          <Shield className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-          <h2 className="text-lg font-bold text-gray-900 mb-2">Sesión expirada</h2>
+        <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl border border-gray-100 text-center">
+          <div className="bg-primary-100 h-16 w-16 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Shield className="h-8 w-8 text-primary-600" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-1">Acceso Seguro</h2>
           <p className="text-sm text-gray-500 mb-6">
-            Por seguridad, necesitas verificar tu identidad nuevamente.
+            Ingresa al portal de la orden <br/><span className="font-mono font-bold text-gray-800 mt-1 block">{orderNumber}</span>
           </p>
-          <button
-            onClick={() => router.push("/")}
-            className="btn-primary inline-flex items-center gap-2"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Volver al inicio
-          </button>
+
+          <input
+            type="tel"
+            value={verifyPhone}
+            onChange={(e) => setVerifyPhone(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleVerifyPortal()}
+            placeholder="Ingresa tu teléfono"
+            className="input-field text-center text-lg mb-4"
+            autoFocus
+          />
+
+          {verifyError && (
+            <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg mb-4 font-medium">{verifyError}</p>
+          )}
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => router.push("/")}
+              className="flex-1 py-3 rounded-xl text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleVerifyPortal}
+              disabled={verifying}
+              className="flex-1 py-3 rounded-xl text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {verifying ? (
+                <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                "Acceder"
+              )}
+            </button>
+          </div>
         </div>
       </div>
     );
