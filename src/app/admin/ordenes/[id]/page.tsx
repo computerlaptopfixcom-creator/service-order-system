@@ -17,6 +17,10 @@ import { formatMoney, formatMoneyShort } from "@/lib/currencies";
 import { useCurrency } from "@/components/providers/currency-provider";
 import { SignaturePad } from "@/components/signature-pad";
 import { PhotoUpload } from "@/components/photo-upload";
+import { PaymentSummary } from "@/components/orders/payment/payment-summary";
+import { PaymentHistory } from "@/components/orders/payment/payment-history";
+import { AddPaymentModal } from "@/components/orders/payment/add-payment-modal";
+import { Payment } from "@/types/order";
 
 const ALL_STATUSES: OrderStatus[] = [
   "recibido",
@@ -45,6 +49,7 @@ export default function OrderDetailPage() {
   const [selectedServices, setSelectedServices] = useState<{ id: string; name: string; basePrice: number; linkedPartId?: string; linkedPartName?: string; linkedPartCost?: number }[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [showServiceDropdown, setShowServiceDropdown] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   const [parts, setParts] = useState<{ id: string; name: string; stock: number }[]>([]);
   const [settings, setSettings] = useState<any>(null);
@@ -185,6 +190,80 @@ export default function OrderDetailPage() {
       setTimeout(() => setSuccess(""), 4000);
     } catch {
       setError("Error al actualizar el estado");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddPayment = async (payment: Payment) => {
+    if (!order) return;
+    setSaving(true);
+    const newPayments = [...(order.payments || []), payment];
+    const newTotalPaid = newPayments.reduce((sum, p) => sum + p.amount, 0);
+    const cost = selectedServices.length > 0 ? servicesTotalPrice : (order.estimatedCost || 0);
+    const newBalance = Math.max(0, cost - newTotalPaid);
+    
+    let newPaymentStatus = order.paymentStatus;
+    if (newTotalPaid >= cost) newPaymentStatus = "PAGADO";
+    else if (newTotalPaid > 0) newPaymentStatus = "ANTICIPO";
+    
+    try {
+      const res = await fetch(`/api/orders/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...order,
+          payments: newPayments,
+          totalPaid: newTotalPaid,
+          balanceDue: newBalance,
+          paymentStatus: newPaymentStatus,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      const updated = await res.json();
+      setOrder(updated);
+      setSuccess("Pago registrado correctamente");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch {
+      setError("Error al registrar pago");
+    } finally {
+      setSaving(false);
+      setShowPaymentModal(false);
+    }
+  };
+
+  const handleDeletePayment = async (paymentId: string) => {
+    if (!order || !confirm("¿Eliminar este pago? Esta acción no se puede deshacer.")) return;
+    setSaving(true);
+    const newPayments = (order.payments || []).filter(p => p.id !== paymentId);
+    const newTotalPaid = newPayments.reduce((sum, p) => sum + p.amount, 0);
+    const cost = selectedServices.length > 0 ? servicesTotalPrice : (order.estimatedCost || 0);
+    const newBalance = Math.max(0, cost - newTotalPaid);
+    
+    let newPaymentStatus = order.paymentStatus;
+    if (newTotalPaid >= cost) newPaymentStatus = "PAGADO";
+    else if (newTotalPaid > 0) newPaymentStatus = "ANTICIPO";
+    else newPaymentStatus = "PENDIENTE";
+
+    try {
+      const res = await fetch(`/api/orders/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...order,
+          payments: newPayments,
+          totalPaid: newTotalPaid,
+          balanceDue: newBalance,
+          paymentStatus: newPaymentStatus,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      const updated = await res.json();
+      setOrder(updated);
+      setSuccess("Pago eliminado");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch {
+      setError("Error al eliminar pago");
     } finally {
       setSaving(false);
     }
@@ -769,6 +848,48 @@ ${order.signature ? `<div class="divider"></div><div style="text-align:center"><
             )}
           </div>
         </div>
+
+        {/* Payments Section */}
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-green-600" />
+              Pagos y Anticipos
+            </h3>
+            <button
+              onClick={() => setShowPaymentModal(true)}
+              className="btn-secondary text-xs px-3 py-1.5"
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Registrar Pago
+            </button>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <PaymentSummary
+                totalCost={selectedServices.length > 0 ? servicesTotalPrice : (order.estimatedCost || 0)}
+                totalPaid={order.totalPaid || 0}
+                balanceDue={Math.max(0, (selectedServices.length > 0 ? servicesTotalPrice : (order.estimatedCost || 0)) - (order.totalPaid || 0))}
+                paymentStatus={order.paymentStatus || "PENDIENTE"}
+              />
+            </div>
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Historial de Pagos</h4>
+              <PaymentHistory
+                payments={order.payments || []}
+                onDelete={handleDeletePayment}
+              />
+            </div>
+          </div>
+        </div>
+
+        <AddPaymentModal
+          isOpen={showPaymentModal}
+          onClose={() => setShowPaymentModal(false)}
+          onAdd={handleAddPayment}
+          suggestedAmount={Math.max(0, (selectedServices.length > 0 ? servicesTotalPrice : (order.estimatedCost || 0)) - (order.totalPaid || 0))}
+        />
 
         {/* Device Photos */}
         <div className="card">
