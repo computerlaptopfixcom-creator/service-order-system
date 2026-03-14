@@ -1,0 +1,650 @@
+"use client";
+
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { DEVICE_TYPES, DEVICE_BRANDS, ServiceOrder } from "@/types/order";
+import { Save, ArrowLeft, Printer, CheckCircle, Eye, MessageCircle, PlusCircle, FileDown } from "lucide-react";
+import { formatMoney } from "@/lib/currencies";
+import Link from "next/link";
+import { useCurrency } from "@/components/providers/currency-provider";
+import { PhotoUpload } from "@/components/photo-upload";
+import { generateQRCodeDataURL, buildOrderPortalURL } from "@/lib/qrcode";
+
+export default function NuevaOrdenPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>}>
+      <NuevaOrdenContent />
+    </Suspense>
+  );
+}
+
+function NuevaOrdenContent() {
+  const searchParams = useSearchParams();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [createdOrder, setCreatedOrder] = useState<ServiceOrder | null>(null);
+  const { currency } = useCurrency();
+  const [settings, setSettings] = useState<any>(null);
+
+  const [form, setForm] = useState({
+    customerName: "",
+    customerPhone: "",
+    customerEmail: "",
+    deviceType: "",
+    deviceBrand: "",
+    deviceModel: "",
+    serialNumber: "",
+    accessories: "",
+    problemDescription: "",
+    diagnosis: "",
+    devicePhotos: [] as string[],
+    internalNotes: "",
+  });
+  const [phoneError, setPhoneError] = useState("");
+  const [searchingCustomer, setSearchingCustomer] = useState(false);
+  const [customerSuggestions, setCustomerSuggestions] = useState<any[]>([]);
+  const [hasDraft, setHasDraft] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => setSettings(data))
+      .catch(() => { });
+
+    // Check for phone parameter in URL (coming from clients page)
+    const phoneParam = searchParams.get('phone');
+    if (phoneParam) {
+      // Search for existing customer data
+      fetch(`/api/orders/search?q=${encodeURIComponent(phoneParam)}&type=phone`)
+        .then((r) => r.json())
+        .then((data) => {
+          const orders = Array.isArray(data) ? data : [];
+          if (orders.length > 0) {
+            // Get the most recent order's customer data
+            const latest = orders.sort((a: any, b: any) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            )[0];
+            setForm((prev) => ({
+              ...prev,
+              customerName: latest.customerName || "",
+              customerPhone: latest.customerPhone || phoneParam,
+              customerEmail: latest.customerEmail || "",
+            }));
+          } else {
+            // Just set the phone number
+            setForm((prev) => ({ ...prev, customerPhone: phoneParam }));
+          }
+        })
+        .catch(() => {
+          setForm((prev) => ({ ...prev, customerPhone: phoneParam }));
+        });
+      return; // Don't load draft if coming from clients page
+    }
+
+    // Load draft from localStorage
+    const draft = localStorage.getItem('orderDraft');
+    if (draft) {
+      try {
+        const parsed = JSON.parse(draft);
+        if (parsed.form) setForm(parsed.form);
+        setHasDraft(true);
+      } catch { }
+    }
+  }, [searchParams]);
+
+  // Autosave draft every 10 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (form.customerName || form.customerPhone || form.problemDescription) {
+        localStorage.setItem('orderDraft', JSON.stringify({ form }));
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [form]);
+
+  const searchCustomerByPhone = async (phone: string) => {
+    if (!phone || phone.length < 4) return;
+    setSearchingCustomer(true);
+    try {
+      const res = await fetch(`/api/orders/search?q=${encodeURIComponent(phone)}&type=phone`);
+      if (res.ok) {
+        const data = await res.json();
+        const orders = Array.isArray(data) ? data : [];
+        if (orders.length > 0) {
+          const customers = orders.reduce((acc: any[], order: any) => {
+            if (!acc.find((c: any) => c.phone === order.customerPhone)) {
+              acc.push({
+                name: order.customerName,
+                phone: order.customerPhone,
+                email: order.customerEmail || "",
+              });
+            }
+            return acc;
+          }, []);
+          setCustomerSuggestions(customers);
+        } else {
+          setCustomerSuggestions([]);
+        }
+      }
+    } catch {
+      setCustomerSuggestions([]);
+    } finally {
+      setSearchingCustomer(false);
+    }
+  };
+
+  const selectCustomer = (customer: any) => {
+    setForm((prev) => ({
+      ...prev,
+      customerName: customer.name,
+      customerPhone: customer.phone,
+      customerEmail: customer.email,
+    }));
+    setCustomerSuggestions([]);
+    setPhoneError("");
+  };
+
+  const clearDraft = () => {
+    localStorage.removeItem('orderDraft');
+  };
+
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+  ) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+
+    if (name === "customerPhone") {
+      const cleaned = value.replace(/\D/g, "");
+      if (value && cleaned.length < 4) {
+        setPhoneError("Ingresa al menos 4 dígitos");
+        setCustomerSuggestions([]);
+      } else {
+        setPhoneError("");
+        if (cleaned.length >= 4) {
+          searchCustomerByPhone(cleaned);
+        }
+      }
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const missing = [];
+    if (!form.customerName?.trim()) missing.push("Nombre del cliente");
+    if (!form.customerPhone?.trim()) missing.push("Teléfono");
+    if (!form.deviceType?.trim()) missing.push("Tipo de equipo");
+    if (!form.problemDescription?.trim()) missing.push("Descripción del problema");
+
+    if (missing.length > 0) {
+      setError(`Por favor completa los campos obligatorios: ${missing.join(", ")}`);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...form,
+          estimatedCost: 0,
+          partsCost: 0,
+          estimatedDelivery: "",
+          selectedServices: [],
+          internalNotes: form.internalNotes ? [{ text: form.internalNotes, date: new Date().toISOString() }] : [],
+        }),
+      });
+
+      if (!res.ok) throw new Error("Error al guardar");
+
+      const order = await res.json();
+      setCreatedOrder(order);
+      clearDraft();
+      setSaving(false);
+    } catch {
+      setError("Error al crear la orden. Intenta de nuevo.");
+      setSaving(false);
+    }
+  };
+
+  const handlePrintCreated = async () => {
+    if (!createdOrder) return;
+    const o = createdOrder;
+    const s = await fetch("/api/settings").then(r => r.json()).catch(() => ({}));
+    // Removed local currency set
+    const bName = s.businessName || "Mi Taller";
+    const bInfo = [s.address, s.phone].filter(Boolean).join(" | Tel: ");
+
+    // Generate QR code for client portal
+    const portalUrl = buildOrderPortalURL(o.orderNumber);
+    const qrCodeDataUrl = await generateQRCodeDataURL(portalUrl);
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+    printWindow.document.write(`<!DOCTYPE html><html><head><title>Recibo ${o.orderNumber}</title>
+<style>body{font-family:Arial,sans-serif;max-width:400px;margin:0 auto;padding:20px;font-size:14px}
+h1{text-align:center;font-size:18px;margin-bottom:4px}h2{text-align:center;font-size:12px;color:#666;font-weight:normal;margin-top:0}
+.divider{border-top:1px dashed #ccc;margin:12px 0}.row{display:flex;justify-content:space-between;margin:6px 0}
+.label{color:#666}.value{font-weight:bold;text-align:right}.big{font-size:20px;text-align:center;margin:12px 0;letter-spacing:2px}
+.status{background:#eee;padding:6px 12px;border-radius:4px;text-align:center;font-weight:bold;margin:12px 0}
+.footer{text-align:center;color:#999;font-size:11px;margin-top:20px}
+.terms{margin-top:16px;padding-top:12px;border-top:1px dashed #ccc;font-size:9px;color:#999;line-height:1.4}
+.qr-section{text-align:center;margin:16px 0;padding:12px;background:#f9f9f9;border-radius:8px}
+.qr-section img{margin:8px auto;display:block}
+.qr-section p{font-size:10px;color:#666;margin:4px 0}</style></head><body>
+<h1>${bName}</h1>${bInfo ? `<h2>${bInfo}</h2>` : ""}
+<div class="divider"></div>
+<div class="big">${o.orderNumber}</div>
+<div class="status">Recibido</div>
+<div class="divider"></div>
+<div class="row"><span class="label">Cliente:</span><span class="value">${o.customerName}</span></div>
+<div class="row"><span class="label">Teléfono:</span><span class="value">${o.customerPhone}</span></div>
+<div class="row"><span class="label">Equipo:</span><span class="value">${o.deviceBrand} ${o.deviceType}</span></div>
+${o.deviceModel ? `<div class="row"><span class="label">Modelo:</span><span class="value">${o.deviceModel}</span></div>` : ""}
+${o.serialNumber ? `<div class="row"><span class="label">N/S:</span><span class="value">${o.serialNumber}</span></div>` : ""}
+${o.accessories ? `<div class="row"><span class="label">Accesorios:</span><span class="value">${o.accessories}</span></div>` : ""}
+<div class="divider"></div>
+<div class="row"><span class="label">Problema:</span></div>
+<div>${o.problemDescription}</div>
+<div class="divider"></div>
+<div class="row"><span class="label">Fecha:</span><span class="value">${new Date(o.createdAt).toLocaleDateString("es-MX")}</span></div>
+${qrCodeDataUrl ? `<div class="qr-section"><p><strong>Consulte el estado de su orden:</strong></p><img src="${qrCodeDataUrl}" alt="QR Code" /><p>Escanee el código QR para ver el estado de su equipo</p></div>` : `<div class="footer"><p>Consulte el estado de su orden en línea con el número de orden mostrado arriba.</p></div>`}
+<div class="footer"><p>Gracias por su preferencia.</p></div>
+<div class="terms"><strong>TÉRMINOS Y CONDICIONES:</strong><br>
+${settings?.termsAndConditions ? settings.termsAndConditions.replace(/\n/g, "<br>") : "Sin términos configurados."}</div>
+</body></html>`);
+    printWindow.document.close();
+    printWindow.print();
+  };
+
+  const handleSavePDF = async () => {
+    if (!createdOrder) return;
+    const o = createdOrder;
+    const s = await fetch("/api/settings").then(r => r.json()).catch(() => ({}));
+    const cur = currency;
+    const bName = s.businessName || "Mi Taller";
+    const bInfo = [s.address, s.phone].filter(Boolean).join(" | Tel: ");
+
+    const container = document.createElement("div");
+    container.innerHTML = `<div style="font-family:Arial,sans-serif;max-width:400px;margin:0 auto;padding:20px;font-size:14px">
+<h1 style="text-align:center;font-size:18px;margin-bottom:4px">${bName}</h1>
+${bInfo ? `<h2 style="text-align:center;font-size:12px;color:#666;font-weight:normal;margin-top:0">${bInfo}</h2>` : ""}
+<div style="border-top:1px dashed #ccc;margin:12px 0"></div>
+<div style="font-size:20px;text-align:center;margin:12px 0;letter-spacing:2px;font-weight:bold">${o.orderNumber}</div>
+<div style="background:#eee;padding:6px 12px;border-radius:4px;text-align:center;font-weight:bold;margin:12px 0">Recibido</div>
+<div style="border-top:1px dashed #ccc;margin:12px 0"></div>
+<div style="display:flex;justify-content:space-between;margin:6px 0"><span style="color:#666">Cliente:</span><span style="font-weight:bold;text-align:right">${o.customerName}</span></div>
+<div style="display:flex;justify-content:space-between;margin:6px 0"><span style="color:#666">Teléfono:</span><span style="font-weight:bold;text-align:right">${o.customerPhone}</span></div>
+<div style="display:flex;justify-content:space-between;margin:6px 0"><span style="color:#666">Equipo:</span><span style="font-weight:bold;text-align:right">${o.deviceBrand} ${o.deviceType}</span></div>
+${o.deviceModel ? `<div style="display:flex;justify-content:space-between;margin:6px 0"><span style="color:#666">Modelo:</span><span style="font-weight:bold;text-align:right">${o.deviceModel}</span></div>` : ""}
+${o.serialNumber ? `<div style="display:flex;justify-content:space-between;margin:6px 0"><span style="color:#666">N/S:</span><span style="font-weight:bold;text-align:right">${o.serialNumber}</span></div>` : ""}
+${o.accessories ? `<div style="display:flex;justify-content:space-between;margin:6px 0"><span style="color:#666">Accesorios:</span><span style="font-weight:bold;text-align:right">${o.accessories}</span></div>` : ""}
+<div style="border-top:1px dashed #ccc;margin:12px 0"></div>
+<div style="margin:6px 0"><span style="color:#666">Problema:</span></div>
+<div>${o.problemDescription}</div>
+<div style="border-top:1px dashed #ccc;margin:12px 0"></div>
+<div style="display:flex;justify-content:space-between;margin:6px 0"><span style="color:#666">Fecha:</span><span style="font-weight:bold;text-align:right">${new Date(o.createdAt).toLocaleDateString("es-MX")}</span></div>
+<div style="text-align:center;color:#999;font-size:11px;margin-top:20px"><p>Consulte el estado de su orden en línea con el número de orden mostrado arriba.</p><p>Gracias por su preferencia.</p></div>
+<div style="margin-top:16px;padding-top:12px;border-top:1px dashed #ccc;font-size:9px;color:#999;line-height:1.4"><strong>TÉRMINOS Y CONDICIONES:</strong><br>
+${s?.termsAndConditions ? s.termsAndConditions.replace(/\n/g, "<br>") : "Sin términos configurados."}</div>
+</div>`;
+
+    const html2pdf = (await import("html2pdf.js")).default;
+    html2pdf()
+      .set({
+        margin: 10,
+        filename: `Recibo-${o.orderNumber}.pdf`,
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+      })
+      .from(container)
+      .save();
+  };
+
+  const sendWhatsAppCreated = () => {
+    if (!createdOrder) return;
+    fetch("/api/settings").then(r => r.json()).then((s) => {
+      const template = s.whatsappTemplateCreated || "Hola {nombre}, su equipo {equipo} ha sido recibido. Orden: {orden}.";
+      const msg = template
+        .replace("{nombre}", createdOrder.customerName)
+        .replace("{equipo}", `${createdOrder.deviceBrand} ${createdOrder.deviceType}`)
+        .replace("{orden}", createdOrder.orderNumber);
+      const cc = s.countryCode || "52";
+      const phone = createdOrder.customerPhone.replace(/\D/g, "");
+      const fullPhone = phone.startsWith(cc) ? phone : `${cc}${phone}`;
+      window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, "_blank");
+    });
+  };
+
+  if (createdOrder) {
+    return (
+      <div className="max-w-md mx-auto py-10 px-4">
+        <div className="card text-center">
+          <div className="bg-green-50 dark:bg-green-900/20 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5">
+            <CheckCircle className="h-10 w-10 text-green-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">¡Orden Creada!</h2>
+          <p className="text-3xl font-mono font-bold text-primary-600 my-3 tracking-wider">{createdOrder.orderNumber}</p>
+          <p className="text-gray-400 text-sm mb-8">Registrada el {new Date(createdOrder.createdAt).toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}</p>
+
+          <div className="space-y-3">
+            <button
+              onClick={handlePrintCreated}
+              className="w-full flex items-center justify-center gap-3 py-3.5 px-5 rounded-xl font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors text-sm"
+            >
+              <Printer className="h-5 w-5" />
+              Imprimir Recibo
+            </button>
+            <button
+              onClick={handleSavePDF}
+              className="w-full flex items-center justify-center gap-3 py-3.5 px-5 rounded-xl font-medium text-white bg-red-500 hover:bg-red-600 transition-colors text-sm shadow-sm"
+            >
+              <FileDown className="h-5 w-5" />
+              Guardar PDF
+            </button>
+            <button
+              onClick={sendWhatsAppCreated}
+              className="w-full flex items-center justify-center gap-3 py-3.5 px-5 rounded-xl font-medium text-white bg-green-500 hover:bg-green-600 transition-colors text-sm shadow-sm"
+            >
+              <MessageCircle className="h-5 w-5" />
+              Enviar WhatsApp al Cliente
+            </button>
+            <Link
+              href={`/admin/ordenes/${createdOrder.id}`}
+              className="w-full flex items-center justify-center gap-3 py-3.5 px-5 rounded-xl font-medium text-white bg-primary-600 hover:bg-primary-700 transition-colors text-sm shadow-sm"
+            >
+              <Eye className="h-5 w-5" />
+              Ver Detalle de Orden
+            </Link>
+          </div>
+
+          <div className="mt-6 pt-5 border-t border-gray-100 dark:border-gray-700">
+            <Link
+              href="/admin/nueva-orden"
+              onClick={() => setCreatedOrder(null)}
+              className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-primary-600 transition-colors"
+            >
+              <PlusCircle className="h-4 w-4" />
+              Crear otra orden
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto">
+      <div className="flex items-center gap-3 mb-6">
+        <Link
+          href="/admin"
+          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+        >
+          <ArrowLeft className="h-5 w-5 text-gray-500" />
+        </Link>
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Nueva Orden de Servicio</h2>
+          <p className="text-gray-500 text-sm mt-1">
+            Completa los datos del cliente y el equipo
+          </p>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm">
+          {error}
+        </div>
+      )}
+
+      {hasDraft && (
+        <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Save className="h-4 w-4 text-blue-600 shrink-0" />
+            <span className="text-blue-700 dark:text-blue-400">Borrador guardado automáticamente</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              localStorage.removeItem('orderDraft');
+              setHasDraft(false);
+              window.location.reload();
+            }}
+            className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+          >
+            Limpiar borrador
+          </button>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Customer Info */}
+        <div className="card">
+          <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Datos del Cliente</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Nombre completo <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="customerName"
+                value={form.customerName}
+                onChange={handleChange}
+                className="input-field"
+                placeholder="Juan Pérez"
+              />
+            </div>
+            <div className="relative">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Teléfono <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="tel"
+                name="customerPhone"
+                value={form.customerPhone}
+                onChange={handleChange}
+                className={`input-field ${phoneError ? 'border-red-300' : ''}`}
+                placeholder="(123) 456-7890"
+              />
+              {phoneError && (
+                <p className="text-xs text-red-500 mt-1">{phoneError}</p>
+              )}
+              {searchingCustomer && (
+                <p className="text-xs text-gray-400 mt-1">Buscando clientes...</p>
+              )}
+              {customerSuggestions.length > 0 && (
+                <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {customerSuggestions.map((customer, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => selectCustomer(customer)}
+                      className="w-full text-left px-4 py-2 hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors border-b border-gray-100 dark:border-gray-700 last:border-b-0"
+                    >
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">{customer.name}</p>
+                      <p className="text-xs text-gray-500">{customer.phone}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Email
+              </label>
+              <input
+                type="email"
+                name="customerEmail"
+                value={form.customerEmail}
+                onChange={handleChange}
+                className="input-field"
+                placeholder="juan@email.com"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Device Info */}
+        <div className="card">
+          <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Datos del Equipo</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Tipo de equipo <span className="text-red-500">*</span>
+              </label>
+              <select
+                name="deviceType"
+                value={form.deviceType}
+                onChange={handleChange}
+                className="input-field"
+              >
+                <option value="">Seleccionar...</option>
+                {DEVICE_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Marca
+              </label>
+              <select
+                name="deviceBrand"
+                value={form.deviceBrand}
+                onChange={handleChange}
+                className="input-field"
+              >
+                <option value="">Seleccionar...</option>
+                {DEVICE_BRANDS.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Modelo
+              </label>
+              <input
+                type="text"
+                name="deviceModel"
+                value={form.deviceModel}
+                onChange={handleChange}
+                className="input-field"
+                placeholder="Ej: Pavilion 15, Inspiron 3520"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Número de serie
+              </label>
+              <input
+                type="text"
+                name="serialNumber"
+                value={form.serialNumber}
+                onChange={handleChange}
+                className="input-field"
+                placeholder="S/N del equipo"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Accesorios recibidos
+              </label>
+              <input
+                type="text"
+                name="accessories"
+                value={form.accessories}
+                onChange={handleChange}
+                className="input-field"
+                placeholder="Cargador, mouse, funda, etc."
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Device Photos */}
+        <div className="card">
+          <PhotoUpload
+            photos={form.devicePhotos}
+            onChange={(photos) => setForm((prev) => ({ ...prev, devicePhotos: photos }))}
+          />
+        </div>
+
+        {/* Problem & Diagnosis */}
+        <div className="card">
+          <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Problema y Diagnóstico</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Descripción del problema <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                name="problemDescription"
+                value={form.problemDescription}
+                onChange={handleChange}
+                rows={3}
+                className="input-field resize-none"
+                placeholder="Describe el problema que reporta el cliente..."
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Diagnóstico inicial
+              </label>
+              <textarea
+                name="diagnosis"
+                value={form.diagnosis}
+                onChange={handleChange}
+                rows={3}
+                className="input-field resize-none"
+                placeholder="Diagnóstico preliminar (opcional)..."
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-2">
+                Notas internas
+                <span className="text-xs text-gray-400 font-normal">(Solo visible para ti)</span>
+              </label>
+              <textarea
+                name="internalNotes"
+                value={form.internalNotes}
+                onChange={handleChange}
+                rows={2}
+                className="input-field resize-none bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800"
+                placeholder="Ej: Cliente difícil, equipo muy golpeado, etc..."
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Submit */}
+        <div className="flex flex-col sm:flex-row justify-end gap-3">
+          <Link href="/admin" className="btn-secondary w-full sm:w-auto justify-center">
+            Cancelar
+          </Link>
+          <button
+            type="submit"
+            disabled={saving}
+            className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto"
+          >
+            {saving ? (
+              <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            {saving ? "Guardando..." : "Crear Orden"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}

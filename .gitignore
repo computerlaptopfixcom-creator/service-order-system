@@ -1,0 +1,21 @@
+node_modules/
+.next/
+data/
+*.tsbuildinfo
+next-env.d.ts
+*.zip
+.env
+.env.local
+.env*.local
+
+# MCP Configuration
+.vscode/mcp-servers.json
+
+
+/src/generated/prisma
+
+# Logs
+*.log
+
+# Separate projects
+electricista-juarez/
