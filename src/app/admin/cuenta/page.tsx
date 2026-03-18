@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Lock, ShieldCheck } from "lucide-react";
+import { Lock, ShieldCheck, Loader2 } from "lucide-react";
 
-export default function CuentaPage() {
+function CuentaContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const isForced = searchParams.get("force") === "1";
@@ -132,8 +132,20 @@ export default function CuentaPage() {
           </button>
         </div>
       </div>
-
-
     </div>
+  );
+}
+
+export default function CuentaPage() {
+  return (
+    <Suspense 
+      fallback={
+        <div className="flex justify-center items-center h-48">
+          <Loader2 className="h-8 w-8 text-primary-500 animate-spin" />
+        </div>
+      }
+    >
+      <CuentaContent />
+    </Suspense>
   );
 }
