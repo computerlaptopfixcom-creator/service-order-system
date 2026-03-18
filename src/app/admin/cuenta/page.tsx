@@ -1,9 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Lock, ShieldCheck } from "lucide-react";
 
 export default function CuentaPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const isForced = searchParams.get("force") === "1";
+  
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -37,10 +42,16 @@ export default function CuentaPage() {
       if (!res.ok) {
         setPasswordError(data.error || "Error al cambiar la contraseña");
       } else {
-        setPasswordSuccess("Contraseña actualizada correctamente");
+        setPasswordSuccess(isForced ? "Contraseña actualizada. Redirigiendo..." : "Contraseña actualizada correctamente");
         setCurrentPassword("");
         setNewPassword("");
         setConfirmPassword("");
+        
+        if (isForced) {
+          setTimeout(() => {
+            window.location.href = "/admin";
+          }, 1500);
+        }
       }
     } catch {
       setPasswordError("Error al cambiar la contraseña");
