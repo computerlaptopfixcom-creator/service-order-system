@@ -85,8 +85,10 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Public API routes: client portal verification, portal data, budget actions, public search, public settings GET
+  // Public API routes: auth login/logout, client portal verification, portal data, budget actions, public search, public settings GET
   const isPublicRoute =
+    pathname === "/api/auth/login" ||
+    pathname === "/api/auth/logout" ||
     pathname === "/api/orders/verify" ||
     pathname.startsWith("/api/orders/portal/") ||
     (pathname.match(/\/api\/orders\/[^/]+\/budget/) && request.method === "POST") ||
