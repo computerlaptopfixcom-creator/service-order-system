@@ -24,9 +24,13 @@ Sistema profesional diseñado para optimizar el flujo de trabajo en talleres de 
 
 ### 🛠 Gestión Completa
 - **Órdenes de servicio**: Crear, editar, cambiar estado (con botón rápido "Listo para Entrega"), imprimir recibos
+- **💰 Tracking de pagos**: Registrar pagos parciales (anticipos), historial de pagos por orden, estados automáticos (Pendiente/Anticipo/Pagado/Cancelado)
 - **Inventario de partes**: Control de stock con alertas de bajo inventario
 - **Servicios**: Catálogo de servicios con precios y asignación de partes
-- **Reportes**: Estadísticas de órdenes, ganancias y costos
+- **📅 Calendario de citas**: Agendar diagnósticos, entregas y seguimientos con vista diaria/semanal
+- **📚 Base de conocimiento**: Artículos técnicos con síntomas, diagnóstico y solución paso a paso, vinculados a órdenes
+- **👥 Directorio de clientes**: Vista consolidada de clientes con historial de órdenes y totales gastados
+- **Reportes**: Estadísticas de órdenes, ganancias, costos y eficiencia operativa
 - **Centro de notificaciones**: Alertas al admin cuando un cliente aprueba o rechaza presupuesto
 - **Respaldos**: Exportación en CSV (Excel) y ZIP completo (DB + Config)
 
@@ -42,6 +46,7 @@ Sistema profesional diseñado para optimizar el flujo de trabajo en talleres de 
 - **Botones de acción rápida**: Cambiar a "Listo para Entrega" con un clic desde el detalle de orden
 - **Notificaciones WhatsApp**: Mensajes automáticos personalizados con variables
 - **Notificaciones por Email**: Integración con SMTP personalizado u opcional
+- **🔒 Seguridad reforzada**: Middleware universal que protege todas las rutas API por defecto, hashing PBKDF2 de contraseñas, rate limiting anti fuerza bruta
 - **Tema Premium Claro**: Interfaz de usuario unificada y forzada a modo claro para mayor legibilidad
 - **Personalización**: Logo, colores, horarios, plantillas de mensajes y términos legales
 - **Multi-dispositivo**: Responsive 100% para móviles y escritorio
@@ -177,12 +182,14 @@ En **Admin → Configuración → Respaldo de Información**:
 ```
 ├── src/
 │   ├── app/
-│   │   ├── admin/           # Panel administrativo
-│   │   ├── api/             # Rutas API
+│   │   ├── admin/           # Panel administrativo (dashboard, órdenes, inventario, calendario, etc.)
+│   │   ├── api/             # Rutas API (orders, payments, appointments, knowledge, backup, etc.)
 │   │   ├── orden/           # Portal cliente
 │   │   └── page.tsx         # Página pública
-│   ├── components/          # Componentes UI
-│   ├── lib/                # Lógica de negocio
+│   ├── components/          # Componentes UI (pagos, firmas, fotos, notificaciones)
+│   ├── lib/                # Lógica de negocio (storage modular, auth, email, backup)
+│   │   └── storage/        # Módulos: orders, parts, services, appointments, knowledge
+│   ├── middleware.ts       # Seguridad: auth universal, rate limiting
 │   └── types/              # Tipos TypeScript
 ├── prisma/                 # Schema de base de datos
 ├── data/                   # Base de datos SQLite (se crea automático)
@@ -205,6 +212,11 @@ En **Admin → Configuración → Respaldo de Información**:
 - 📊 **Reportes Avanzados**: Eficiencia operativa y desglose financiero
 - 📈 **UI/UX optimizada para móviles**
 - ⚡ **Mejoras de rendimiento con SQLite y Prisma**
+- 💳 **Sistema de tracking de pagos**: Pagos parciales, anticipos, historial completo
+- 📅 **Calendario de citas**: Agenda integrada para diagnósticos, entregas y seguimientos
+- 📚 **Base de conocimiento**: Artículos técnicos reutilizables vinculados a órdenes
+- 👥 **Directorio de clientes**: Vista consolidada con historial y totales
+- 🛡️ **Seguridad reforzada**: Middleware universal `/api/:path*`, PBKDF2 hashing, rate limiting
 
 ## 🤝 Contribuciones
 
