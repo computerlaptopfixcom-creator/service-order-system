@@ -19,3 +19,7 @@ next-env.d.ts
 
 # Separate projects
 electricista-juarez/
+
+# Skills source repo (local reference only)
+antigravity-awesome-skills-main/
+.agent/
