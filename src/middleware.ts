@@ -4,22 +4,33 @@ import { checkRateLimit } from "@/lib/rate-limit";
 const AUTH_COOKIE = "str_admin_session";
 const SECRET = process.env.AUTH_SECRET || "str-default-secret";
 
-// Session token max age: 24 hours
-const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+interface SessionPayload {
+  userId: string;
+  username: string;
+  role: string;
+  displayName: string;
+  mustChangePassword: boolean;
+}
 
-async function validateToken(token: string): Promise<boolean> {
-  if (!token || !token.includes(".")) return false;
-  const [raw, hash] = token.split(".");
-  if (!raw || !hash || raw.length < 10 || hash.length !== 64) return false;
+async function validateToken(token: string): Promise<SessionPayload | null> {
+  if (!token) return null;
 
-  // Check token expiration
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+
+  const [payloadB64, timestampRandom, hash] = parts;
+  const raw = `${payloadB64}.${timestampRandom}`;
+
+  // Check token expiration (24 hours)
+  const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
   try {
-    const timestamp = parseInt(raw.split("-")[0], 10);
-    if (isNaN(timestamp) || Date.now() - timestamp > SESSION_MAX_AGE_MS) return false;
+    const timestamp = parseInt(timestampRandom.split("-")[0], 10);
+    if (isNaN(timestamp) || Date.now() - timestamp > SESSION_MAX_AGE_MS) return null;
   } catch {
-    return false;
+    return null;
   }
 
+  // Verify HMAC
   try {
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
@@ -31,9 +42,19 @@ async function validateToken(token: string): Promise<boolean> {
     );
     const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(raw));
     const expected = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
-    return expected === hash;
+    if (expected !== hash) return null;
   } catch {
-    return false;
+    return null;
+  }
+
+  // Decode payload
+  try {
+    // base64url decode
+    const b64 = payloadB64.replace(/-/g, "+").replace(/_/g, "/");
+    const json = atob(b64);
+    return JSON.parse(json) as SessionPayload;
+  } catch {
+    return null;
   }
 }
 
@@ -43,6 +64,24 @@ function getClientIP(request: NextRequest): string {
     request.headers.get("x-real-ip") ||
     "unknown"
   );
+}
+
+// Routes that require specific roles (admin only)
+const ADMIN_ONLY_ROUTES = [
+  "/api/users",
+  "/api/audit",
+  "/api/backup",
+  "/api/export",
+  "/api/settings",
+  "/admin/usuarios",
+  "/admin/auditoria",
+  "/admin/configuracion",
+];
+
+function requiresAdmin(pathname: string, method: string): boolean {
+  // Settings GET is public
+  if (pathname === "/api/settings" && method === "GET") return false;
+  return ADMIN_ONLY_ROUTES.some(route => pathname.startsWith(route));
 }
 
 export async function middleware(request: NextRequest) {
@@ -79,13 +118,34 @@ export async function middleware(request: NextRequest) {
   // Protect /admin routes (auth check)
   if (pathname.startsWith("/admin")) {
     const session = request.cookies.get(AUTH_COOKIE)?.value;
-    if (!session || !(await validateToken(session))) {
+    const payload = session ? await validateToken(session) : null;
+
+    if (!payload) {
       const loginUrl = new URL("/admin/login", request.url);
       return NextResponse.redirect(loginUrl);
     }
+
+    // Force password change redirect
+    if (payload.mustChangePassword && pathname !== "/admin/cuenta") {
+      const changeUrl = new URL("/admin/cuenta?force=1", request.url);
+      return NextResponse.redirect(changeUrl);
+    }
+
+    // Admin-only page check
+    if (requiresAdmin(pathname, request.method) && payload.role !== "admin") {
+      const dashUrl = new URL("/admin", request.url);
+      return NextResponse.redirect(dashUrl);
+    }
+
+    // Pass user info to the request via headers
+    const response = NextResponse.next();
+    response.headers.set("x-user-id", payload.userId);
+    response.headers.set("x-user-role", payload.role);
+    response.headers.set("x-user-name", payload.displayName);
+    return response;
   }
 
-  // Public API routes: auth login/logout, client portal verification, portal data, budget actions, public search, public settings GET
+  // Public API routes
   const isPublicRoute =
     pathname === "/api/auth/login" ||
     pathname === "/api/auth/logout" ||
@@ -99,12 +159,26 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // All other API routes require admin auth (GET and write)
+  // All other API routes require admin auth
   if (pathname.startsWith("/api/")) {
     const session = request.cookies.get(AUTH_COOKIE)?.value;
-    if (!session || !(await validateToken(session))) {
+    const payload = session ? await validateToken(session) : null;
+
+    if (!payload) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
+
+    // Admin-only API route check
+    if (requiresAdmin(pathname, request.method) && payload.role !== "admin") {
+      return NextResponse.json({ error: "Permisos insuficientes" }, { status: 403 });
+    }
+
+    // Pass user info to API handlers via headers
+    const response = NextResponse.next();
+    response.headers.set("x-user-id", payload.userId);
+    response.headers.set("x-user-role", payload.role);
+    response.headers.set("x-user-name", payload.displayName);
+    return response;
   }
 
   return NextResponse.next();

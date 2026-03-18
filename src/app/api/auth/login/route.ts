@@ -1,28 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
-import { verifyPassword, createSessionToken, AUTH_COOKIE } from "@/lib/auth";
+import { verifyUserCredentials, createSessionToken, AUTH_COOKIE } from "@/lib/auth";
+import { logAudit } from "@/lib/audit";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { password } = body;
+    const { username, password } = body;
 
-    if (!password || !(await verifyPassword(password))) {
+    if (!password) {
       return NextResponse.json(
-        { error: "Contraseña incorrecta" },
+        { error: "La contraseña es requerida" },
+        { status: 400 }
+      );
+    }
+
+    const loginUsername = (username || "admin").trim().toLowerCase();
+    const session = await verifyUserCredentials(loginUsername, password);
+
+    if (!session) {
+      return NextResponse.json(
+        { error: "Usuario o contraseña incorrectos" },
         { status: 401 }
       );
     }
 
-    const token = createSessionToken();
+    const token = createSessionToken(session);
 
-    const response = NextResponse.json({ success: true });
+    // Get client IP for audit
+    const ip =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "unknown";
+
+    await logAudit({
+      userId: session.userId,
+      action: "LOGIN",
+      entity: "auth",
+      ipAddress: ip,
+    });
+
+    const response = NextResponse.json({
+      success: true,
+      user: {
+        displayName: session.displayName,
+        role: session.role,
+        mustChangePassword: session.mustChangePassword,
+      },
+    });
+
     response.cookies.set(AUTH_COOKIE, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24, // 24 hours (matches token validation)
+      maxAge: 60 * 60 * 24, // 24 hours
     });
 
     return response;

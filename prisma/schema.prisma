@@ -218,3 +218,31 @@ model KnowledgeArticle {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
+
+model User {
+  id                 String    @id @default(uuid())
+  username           String    @unique
+  displayName        String
+  email              String?
+  passwordHash       String
+  role               String    @default("tecnico") // admin, tecnico, recepcion
+  isActive           Boolean   @default(true)
+  mustChangePassword Boolean   @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  auditLogs          AuditLog[]
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String   // LOGIN, LOGOUT, CREATE_ORDER, UPDATE_STATUS, etc.
+  entity     String   // order, part, service, settings, user
+  entityId   String?  // ID of affected record
+  details    String?  // JSON with before/after changes
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+}

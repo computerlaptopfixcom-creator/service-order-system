@@ -217,6 +217,7 @@ En **Admin → Configuración → Respaldo de Información**:
 - 📚 **Base de conocimiento**: Artículos técnicos reutilizables vinculados a órdenes
 - 👥 **Directorio de clientes**: Vista consolidada con historial y totales
 - 🛡️ **Seguridad reforzada**: Middleware universal `/api/:path*`, PBKDF2 hashing, rate limiting
+- 🎭 **Gestión de Usuarios Multi-Rol (RBAC)**: Roles de Admin, Técnico y Recepción con menús dinámicos y UI premium (modales, búsqueda en vivo y confirmaciones).
 
 ## 🤝 Contribuciones
 

@@ -23,6 +23,8 @@ import {
   Users,
   Calendar,
   BookOpen,
+  ScrollText,
+  UserCog,
 } from "lucide-react";
 
 
@@ -38,6 +40,7 @@ export default function AdminLayout({
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [businessName, setBusinessName] = useState("");
   const [lowStockCount, setLowStockCount] = useState(0);
+  const [userInfo, setUserInfo] = useState<{ displayName: string; role: string } | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -68,6 +71,16 @@ export default function AdminLayout({
         setLowStockCount(alerts);
       }
     }).catch(() => {});
+
+    // Read user info via API (since cookie is httpOnly)
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((user) => {
+        if (user && user.role) {
+          setUserInfo({ displayName: user.displayName, role: user.role });
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -89,15 +102,17 @@ export default function AdminLayout({
   ];
 
   const analysisNav = [
-    { href: "/admin/reportes", label: "Reportes", icon: BarChart3 },
+    { href: "/admin/reportes", label: "Reportes", icon: BarChart3, roles: ["admin", "recepcion"] },
     { href: "/admin/garantias", label: "Garantías", icon: Shield },
-    { href: "/admin/conocimiento", label: "Conocimiento", icon: BookOpen },
-  ];
+    { href: "/admin/conocimiento", label: "Conocimiento", icon: BookOpen, roles: ["admin", "tecnico"] },
+  ].filter(item => !item.roles || (userInfo && item.roles.includes(userInfo.role)));
 
   const settingsNav = [
-    { href: "/admin/configuracion", label: "Configuración", icon: Settings },
-    { href: "/admin/cuenta", label: "Cuenta", icon: ShieldCheck },
-  ];
+    { href: "/admin/configuracion", label: "Configuración", icon: Settings, adminOnly: true },
+    { href: "/admin/usuarios", label: "Usuarios", icon: UserCog, adminOnly: true },
+    { href: "/admin/auditoria", label: "Auditoría", icon: ScrollText, adminOnly: true },
+    { href: "/admin/cuenta", label: "Mi Cuenta", icon: ShieldCheck, adminOnly: false },
+  ].filter(item => !item.adminOnly || userInfo?.role === "admin");
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -137,7 +152,7 @@ export default function AdminLayout({
       </div>
 
       {/* Main Navigation */}
-      <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+      <div className="flex-1 overflow-y-auto scrollbar-hide py-4 px-3 space-y-1">
         {!sidebarCollapsed && (
           <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">
             Principal
@@ -221,8 +236,14 @@ export default function AdminLayout({
         })}
       </div>
 
-      {/* Bottom */}
+      {/* User Info & Bottom */}
       <div className="border-t border-slate-700/50 p-3 space-y-1 shrink-0">
+        {userInfo && !sidebarCollapsed && (
+          <div className="px-3 py-2 mb-1">
+            <p className="text-xs font-medium text-white truncate">{userInfo.displayName}</p>
+            <p className="text-[10px] text-slate-400 capitalize">{userInfo.role}</p>
+          </div>
+        )}
         <Link
           href="/"
           title={sidebarCollapsed ? "Ver sitio público" : undefined}

@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Monitor, Lock, Eye, EyeOff } from "lucide-react";
+import { Monitor, Lock, Eye, EyeOff, User } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -22,17 +23,26 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({
+          username: username.trim().toLowerCase() || "admin",
+          password,
+        }),
       });
 
+      const data = await res.json();
+
       if (!res.ok) {
-        const data = await res.json();
-        setError(data.error || "Contraseña incorrecta");
+        setError(data.error || "Credenciales incorrectas");
         setLoading(false);
         return;
       }
 
-      router.push("/admin");
+      // If user must change password, redirect to account page
+      if (data.user?.mustChangePassword) {
+        router.push("/admin/cuenta?force=1");
+      } else {
+        router.push("/admin");
+      }
       router.refresh();
     } catch {
       setError("Error de conexión");
@@ -58,8 +68,24 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
+              <User className="h-4 w-4 inline mr-1" />
+              Usuario
+            </label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="admin"
+              className="input-field"
+              autoFocus
+              autoComplete="username"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               <Lock className="h-4 w-4 inline mr-1" />
-              Contraseña de Administrador
+              Contraseña
             </label>
             <div className="relative">
               <input
@@ -68,7 +94,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Ingresa la contraseña"
                 className="input-field pr-10"
-                autoFocus
+                autoComplete="current-password"
               />
               <button
                 type="button"

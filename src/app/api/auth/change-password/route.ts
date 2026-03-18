@@ -1,39 +1,85 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyStoredPassword, savePassword } from "@/lib/storage";
+import { prisma, hashPasswordSecure, verifyPasswordSecure } from "@/lib/storage/core";
+import { logAudit } from "@/lib/audit";
+import { createSessionToken, AUTH_COOKIE } from "@/lib/auth";
+
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   try {
-    const { currentPassword, newPassword } = await request.json();
+    const body = await request.json();
+    const { currentPassword, newPassword } = body;
+    const userId = request.headers.get("x-user-id");
 
-    if (!currentPassword || !newPassword) {
+    if (!userId) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    if (!newPassword || newPassword.length < 6) {
       return NextResponse.json(
-        { error: "Se requiere la contraseña actual y la nueva" },
+        { error: "La nueva contraseña debe tener mínimo 6 caracteres" },
         { status: 400 }
       );
     }
 
-    if (newPassword.length < 8) {
-      return NextResponse.json(
-        { error: "La nueva contraseña debe tener al menos 8 caracteres" },
-        { status: 400 }
-      );
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return NextResponse.json({ error: "Usuario no encontrado" }, { status: 404 });
     }
 
-    if (!(await verifyStoredPassword(currentPassword))) {
-      return NextResponse.json(
-        { error: "La contraseña actual es incorrecta" },
-        { status: 403 }
-      );
+    // If not forced change, verify current password
+    if (!user.mustChangePassword) {
+      if (!currentPassword) {
+        return NextResponse.json(
+          { error: "La contraseña actual es requerida" },
+          { status: 400 }
+        );
+      }
+      if (!verifyPasswordSecure(currentPassword, user.passwordHash)) {
+        return NextResponse.json(
+          { error: "La contraseña actual es incorrecta" },
+          { status: 401 }
+        );
+      }
     }
 
-    await savePassword(newPassword);
+    // Update password and clear mustChangePassword flag
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: hashPasswordSecure(newPassword),
+        mustChangePassword: false,
+      },
+    });
 
-    return NextResponse.json({ success: true, message: "Contraseña actualizada correctamente" });
-  } catch {
-    return NextResponse.json(
-      { error: "Error al cambiar la contraseña" },
-      { status: 500 }
-    );
+    await logAudit({
+      userId,
+      action: user.mustChangePassword ? "FORCE_PASSWORD_CHANGE" : "PASSWORD_CHANGED",
+      entity: "auth",
+    });
+
+    // Issue new session token with updated mustChangePassword=false
+    const newSession = {
+      userId: user.id,
+      username: user.username,
+      role: user.role,
+      displayName: user.displayName,
+      mustChangePassword: false,
+    };
+    const token = createSessionToken(newSession);
+
+    const response = NextResponse.json({ success: true });
+    response.cookies.set(AUTH_COOKIE, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24,
+    });
+
+    return response;
+  } catch (error) {
+    console.error("[api/auth/change-password] Error:", error);
+    return NextResponse.json({ error: "Error del servidor" }, { status: 500 });
   }
 }
