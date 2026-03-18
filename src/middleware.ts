@@ -98,16 +98,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // All other API routes require admin auth (GET and write)
-  const isApiRoute =
-    pathname.startsWith("/api/orders") ||
-    pathname.startsWith("/api/settings") ||
-    pathname.startsWith("/api/parts") ||
-    pathname.startsWith("/api/services") ||
-    pathname.startsWith("/api/notifications") ||
-    pathname.startsWith("/api/export") ||
-    pathname.startsWith("/api/auth/change-password");
-
-  if (isApiRoute) {
+  if (pathname.startsWith("/api/")) {
     const session = request.cookies.get(AUTH_COOKIE)?.value;
     if (!session || !(await validateToken(session))) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
@@ -118,5 +109,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/api/orders/:path*", "/api/settings/:path*", "/api/parts/:path*", "/api/services/:path*", "/api/notifications/:path*", "/api/export/:path*", "/api/auth/:path*"],
+  matcher: ["/admin/:path*", "/api/:path*"],
 };
